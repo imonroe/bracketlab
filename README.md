@@ -4,12 +4,22 @@ Combine three bracketed RAW exposures (Sony ARW) into one editable floating-poin
 
 ## Status
 
-The web app, job model, queue and worker are in place. The imaging engine is not: HDRMerge and darktable-cli arrive with the Phase 0 feasibility work. Until then, the worker uses one of two stand-in engines:
+The web app, job model, queue and worker are in place. The Docker image now contains the native toolchain (HDRMerge built from source, darktable-cli 5.6.2, ExifTool), and it merges and renders an a6100 file headless. See [`docs/phase-0.md`](docs/phase-0.md) for findings and what's left before the go/no-go. The worker isn't wired to those tools yet, so it still uses one of two stand-in engines:
 
 | `BRACKETLAB_ENGINE` | Behaviour |
 | --- | --- |
 | `unavailable` (default) | Jobs fail with "the merge engine isn't installed". |
 | `fake` | **Development only.** The "DNG" is a copy of the first input and the preview is a 1×1 placeholder. Use it to exercise the UI and job flow. |
+
+## Running with Docker
+
+```sh
+docker compose up --build        # http://127.0.0.1:3000
+docker run --rm bracketlab smoke-test                          # check the toolchain
+docker run --rm -v "$PWD/brackets:/in:ro" bracketlab smoke-test /in/1.ARW /in/2.ARW /in/3.ARW
+```
+
+The image runs the web server and worker together by default. `web` and `worker` commands run either one alone against a shared `/data` volume.
 
 ## Development
 
@@ -79,6 +89,6 @@ plus: failed, canceled, expired
 
 ## Not yet built
 
-- HDRMerge and darktable-cli engines, plus the metadata preflight (camera model, ISO, aperture, exposure ordering) from PRD F2.
-- Dockerfile, process supervisor and compose file.
+- The metadata preflight (camera model, ISO, aperture, exposure ordering) from PRD F2.
+- Worker adapter that drives HDRMerge and darktable-cli (per-job HOME, metadata stripping).
 - RAW fixture regression tests (they need real a6100 brackets).

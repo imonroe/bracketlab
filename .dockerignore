@@ -1,0 +1,11 @@
+.git
+.next
+node_modules
+dist
+data
+coverage
+*.tsbuildinfo
+next-env.d.ts
+.env*
+Dockerfile
+compose.yaml

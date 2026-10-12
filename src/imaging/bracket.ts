@@ -44,6 +44,14 @@ export const DEFAULT_POLICY: BracketPolicy = {
   maxCaptureSpanSeconds: 30,
 };
 
+/** The policy both the web process and the worker use, from BRACKETLAB_SUPPORTED_MODELS. */
+export function bracketPolicyFromEnv(env: Record<string, string | undefined> = process.env): BracketPolicy {
+  const models = env.BRACKETLAB_SUPPORTED_MODELS?.split(",")
+    .map((m) => m.trim())
+    .filter(Boolean);
+  return { ...DEFAULT_POLICY, supportedModels: models?.length ? models : DEFAULT_POLICY.supportedModels };
+}
+
 const RAW_TYPES = new Set(["ARW"]);
 
 function frame(i: number): string {
@@ -66,8 +74,38 @@ function parseExifDate(value: string | undefined): number | undefined {
   return Date.UTC(y, mo - 1, d, h, mi, s);
 }
 
-function formatShutter(seconds: number): string {
+export function formatShutter(seconds: number): string {
   return seconds >= 0.5 ? `${Number(seconds.toFixed(1))}s` : `1/${Math.round(1 / seconds)}s`;
+}
+
+/**
+ * Problems with one file on its own, so the page can flag a file as soon as it uploads.
+ * Each issue names the file it belongs to.
+ */
+export function checkFrame(f: ExposureInfo, policy: BracketPolicy = DEFAULT_POLICY): BracketIssue[] {
+  if (!f.fileType || !RAW_TYPES.has(f.fileType.toUpperCase())) {
+    return [
+      {
+        code: "unsupported_format",
+        message: `${frame(f.index)} isn't a supported RAW file${f.fileType ? ` (it looks like ${f.fileType})` : ""}. Upload Sony ARW files.`,
+      },
+    ];
+  }
+  const issues: BracketIssue[] = [];
+  const model = f.model ?? "";
+  if (!policy.supportedModels.includes("*") && !policy.supportedModels.includes(model)) {
+    issues.push({
+      code: "unsupported_camera",
+      message: `${frame(f.index)} comes from ${model || "an unknown camera"}, which hasn't been tested with BracketLab yet. Supported: ${policy.supportedModels.join(", ")}.`,
+    });
+  }
+  if (f.exposureTime === undefined || f.iso === undefined || f.fNumber === undefined) {
+    issues.push({
+      code: "missing_exposure",
+      message: `${frame(f.index)} is missing its shutter speed, ISO or aperture, so the exposures can't be ordered.`,
+    });
+  }
+  return issues;
 }
 
 export function checkBracket(frames: ExposureInfo[], policy: BracketPolicy = DEFAULT_POLICY): BracketCheck {
@@ -80,37 +118,14 @@ export function checkBracket(frames: ExposureInfo[], policy: BracketPolicy = DEF
     return result();
   }
 
-  const notRaw = frames.filter((f) => !f.fileType || !RAW_TYPES.has(f.fileType.toUpperCase()));
-  for (const f of notRaw) {
-    errors.push({
-      code: "unsupported_format",
-      message: `${frame(f.index)} isn't a supported RAW file${f.fileType ? ` (it looks like ${f.fileType})` : ""}. Upload Sony ARW files.`,
-    });
-  }
-  if (notRaw.length > 0) return result();
+  for (const f of frames) errors.push(...checkFrame(f, policy));
+  if (errors.length > 0) return result();
 
   const models = distinct(frames.map((f) => `${f.make ?? ""} ${f.model ?? ""}`.trim()));
   if (models.length > 1) {
     errors.push({ code: "mixed_cameras", message: `The files come from different cameras (${models.join(", ")}).` });
+    return result();
   }
-  const model = frames[0].model ?? "";
-  if (!policy.supportedModels.includes("*") && !policy.supportedModels.includes(model)) {
-    errors.push({
-      code: "unsupported_camera",
-      message: `${model || "This camera"} hasn't been tested with BracketLab yet. Supported: ${policy.supportedModels.join(", ")}.`,
-    });
-  }
-
-  const missing = frames.filter(
-    (f) => f.exposureTime === undefined || f.iso === undefined || f.fNumber === undefined,
-  );
-  for (const f of missing) {
-    errors.push({
-      code: "missing_exposure",
-      message: `${frame(f.index)} is missing its shutter speed, ISO or aperture, so the exposures can't be ordered.`,
-    });
-  }
-  if (missing.length > 0 || errors.length > 0) return result();
 
   if (!allClose(frames.map((f) => f.iso!))) {
     errors.push({

@@ -89,6 +89,30 @@
   overflow-wrap: anywhere;
 }
 
+.exposure {
+  flex-basis: 100%;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.issue {
+  flex-basis: 100%;
+  font-size: 0.9rem;
+}
+
+.bracket {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+}
+
+.warning {
+  color: var(--warning);
+}
+
 .progress {
   width: 100%;
 }

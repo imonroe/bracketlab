@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { checkBracket, type ExposureInfo } from "@/imaging/bracket";
+import { bracketPolicyFromEnv, checkBracket, checkFrame, type ExposureInfo } from "@/imaging/bracket";
 
 /** A valid ±2 EV a6100 bracket, given in slot order (middle, dark, bright). */
 function bracket(overrides: Partial<ExposureInfo>[] = []): ExposureInfo[] {
@@ -47,10 +47,30 @@ test("non-RAW files are rejected before anything else", () => {
   assert.match(checkBracket(bracket([{ fileType: "JPEG" }])).errors[0].message, /^File 1.*JPEG/);
 });
 
-test("mixed and unsupported cameras are rejected", () => {
-  assert.ok(codes(bracket([{ model: "ILCE-7M3" }])).includes("mixed_cameras"));
-  assert.deepEqual(codes(bracket([{ model: "X" }, { model: "X" }, { model: "X" }])), ["unsupported_camera"]);
+test("unsupported cameras are flagged per file", () => {
+  assert.deepEqual(codes(bracket([{ model: "X" }, { model: "X" }, { model: "X" }])), [
+    "unsupported_camera",
+    "unsupported_camera",
+    "unsupported_camera",
+  ]);
   assert.deepEqual(codes(bracket([{ model: "X" }, { model: "X" }, { model: "X" }]), { supportedModels: ["*"], maxCaptureSpanSeconds: 30 }), []);
+});
+
+test("mixed cameras are rejected even when each is supported", () => {
+  const anyModel = { supportedModels: ["*"], maxCaptureSpanSeconds: 30 };
+  assert.deepEqual(codes(bracket([{ model: "ILCE-7M3" }]), anyModel), ["mixed_cameras"]);
+});
+
+test("checkFrame judges one file on its own", () => {
+  const [ok] = bracket();
+  assert.deepEqual(checkFrame(ok), []);
+  assert.deepEqual(checkFrame({ ...ok, fileType: undefined }).map((i) => i.code), ["unsupported_format"]);
+  assert.deepEqual(checkFrame({ ...ok, index: 2, iso: undefined }).map((i) => i.message.slice(0, 6)), ["File 3"]);
+});
+
+test("the supported-model list comes from the environment", () => {
+  assert.deepEqual(bracketPolicyFromEnv({}).supportedModels, ["ILCE-6100"]);
+  assert.deepEqual(bracketPolicyFromEnv({ BRACKETLAB_SUPPORTED_MODELS: " ILCE-6100, ILCE-7M3 ," }).supportedModels, ["ILCE-6100", "ILCE-7M3"]);
 });
 
 test("missing exposure metadata is rejected rather than guessed", () => {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { PublicJob } from "@/server/jobs/service";
+import type { PublicInput, PublicJob } from "@/server/jobs/service";
 import styles from "./page.module.css";
 
 const STORAGE_KEY = "bracketlab.jobId";
@@ -37,6 +37,21 @@ const STATE_LABELS: Record<PublicJob["state"], string> = {
 function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatExposure(e: NonNullable<PublicInput["exposure"]>): string {
+  return [
+    e.shutter,
+    e.iso !== undefined && `ISO ${e.iso}`,
+    e.fNumber !== undefined && `f/${e.fNumber}`,
+    e.focalLength !== undefined && `${e.focalLength}mm`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function formatEv(ev: number): string {
+  return ev === 0 ? "0 EV" : `+${ev} EV`;
 }
 
 function formatElapsed(ms: number): string {
@@ -243,6 +258,10 @@ export function BracketApp() {
   const cancelable = job !== null && POLLING_STATES.has(job.state);
   const finished = job !== null && !editable && !cancelable;
   const artifactUrl = (kind: "dng" | "jpeg") => (job ? `/api/jobs/${job.id}/artifacts/${kind}` : "#");
+  const bracketOrder = job?.bracket.order ?? null;
+  // Per-file problems already show next to their file; list only whole-bracket ones here.
+  const perFile = new Set(job?.inputs.flatMap((i) => i.issues.map((x) => x.message)) ?? []);
+  const bracketErrors = job?.bracket.errors.filter((e) => !perFile.has(e.message)) ?? [];
 
   return (
     <section className={styles.app} aria-labelledby="bracket-heading">
@@ -275,6 +294,7 @@ export function BracketApp() {
       <ol className={styles.slots}>
         {SLOTS.map((slot) => {
           const view = slots[slot];
+          const serverInput = job?.inputs.find((i) => i.slot === slot);
           const inputId = `slot-${slot}`;
           return (
             <li key={slot} className={styles.slot}>
@@ -303,6 +323,15 @@ export function BracketApp() {
                     {view.error}
                   </span>
                 )}
+                {view.status === "done" && serverInput?.exposure && (
+                  <span className={styles.exposure}>{formatExposure(serverInput.exposure)}</span>
+                )}
+                {view.status === "done" &&
+                  serverInput?.issues.map((issue) => (
+                    <span key={issue.code} className={`${styles.error} ${styles.issue}`}>
+                      {issue.message}
+                    </span>
+                  ))}
               </span>
               {editable && (
                 <>
@@ -335,6 +364,33 @@ export function BracketApp() {
         })}
       </ol>
 
+      {editable && job && !anyUploading && (bracketOrder || bracketErrors.length > 0 || job.bracket.warnings.length > 0) && (
+        <div className={styles.bracket} aria-live="polite">
+          {bracketOrder && (
+            <p>
+              <strong>Bracket looks good.</strong> Darkest to brightest:{" "}
+              {bracketOrder
+                .map(({ slot, evOffset }) => {
+                  const input = job.inputs.find((i) => i.slot === slot);
+                  return `File ${slot + 1} (${input?.exposure?.shutter ?? "?"}, ${formatEv(evOffset)})`;
+                })
+                .join(", ")}
+              .
+            </p>
+          )}
+          {bracketErrors.map((e) => (
+            <p key={e.code} className={styles.error}>
+              {e.message}
+            </p>
+          ))}
+          {job.bracket.warnings.map((w) => (
+            <p key={w.code} className={styles.warning}>
+              {w.message}
+            </p>
+          ))}
+        </div>
+      )}
+
       <div className={styles.status} role="status" aria-live="polite">
         {/* A rejected start reports the same message the job now carries; show it once. */}
         {notice && notice !== job?.error?.message && <p>{notice}</p>}
@@ -353,7 +409,7 @@ export function BracketApp() {
           <button
             type="button"
             className={styles.primary}
-            disabled={!allUploaded || anyUploading || busy}
+            disabled={!allUploaded || anyUploading || busy || !job?.bracket.ready}
             onClick={() => act("/start")}
           >
             Merge exposures

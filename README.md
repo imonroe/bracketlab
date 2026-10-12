@@ -4,7 +4,7 @@ Combine three bracketed RAW exposures (Sony ARW) into one editable floating-poin
 
 ## Status
 
-The app merges for real. In the Docker image, the worker checks the bracket with ExifTool, merges it with HDRMerge into a 16-bit floating-point DNG, and renders a 2560px JPEG preview with darktable-cli 5.6.2. Identifying metadata is stripped from the JPEG. See [`docs/phase-0.md`](docs/phase-0.md) for what's still open before the Phase 0 go/no-go.
+The app merges for real. Each file is checked with ExifTool as soon as it uploads, so problems show next to the file and Merge stays disabled until the bracket is valid. The worker then merges with HDRMerge into a 16-bit floating-point DNG and renders a 2560px JPEG preview with darktable-cli 5.6.2. Identifying metadata (camera serial, GPS, owner) is stripped from both files. See [`docs/phase-0.md`](docs/phase-0.md) for what's still open before the Phase 0 go/no-go.
 
 | `BRACKETLAB_ENGINE` | Behaviour |
 | --- | --- |
@@ -91,6 +91,4 @@ plus: failed, canceled, expired
 
 ## Not yet built
 
-- Showing the bracket check (camera, exposure spacing, warnings) in the UI before Merge. Today it runs in the worker, so problems surface as a failed job.
-- A decision on identifying metadata in the DNG (the camera serial survives the merge).
 - RAW fixture regression tests (they need real a6100 brackets).

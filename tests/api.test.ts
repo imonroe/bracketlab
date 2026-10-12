@@ -161,3 +161,106 @@ test("delete removes the job, its files and clears the cookie", async () => {
   assert.equal(fs.existsSync(root), false);
   assert.equal(getContext().store.get(id), undefined);
 });
+
+/**
+ * With the native engine configured, uploads are checked with ExifTool. This stub treats
+ * each uploaded file's contents as its ExifTool JSON record, so a test controls exactly
+ * what each file reports; non-JSON contents behave like a file ExifTool can't read.
+ */
+function withStubExiftool(): void {
+  const stub = `${env.dir}/exiftool-stub`;
+  fs.writeFileSync(
+    stub,
+    `#!/bin/bash
+for last; do :; done
+if body="$(cat "$last")" && printf '%s' "$body" | head -c1 | grep -q '{'; then
+  echo "[$body]"
+else
+  echo "[{\\"SourceFile\\": \\"$last\\"}]"; exit 1
+fi
+`,
+  );
+  fs.chmodSync(stub, 0o755);
+  process.env.BRACKETLAB_ENGINE = "native";
+  process.env.BRACKETLAB_EXIFTOOL = stub;
+  resetConfig();
+  resetContext();
+}
+
+const arw = (exposureTime: number, extra: Record<string, unknown> = {}) =>
+  JSON.stringify({
+    FileType: "ARW",
+    Make: "SONY",
+    Model: "ILCE-6100",
+    ISO: 100,
+    FNumber: 8,
+    FocalLength: 16,
+    ExposureTime: exposureTime,
+    ...extra,
+  });
+
+async function status(id: string, cookie: string) {
+  return (await getJob(req(`/api/jobs/${id}`, cookie), ctx({ id }))).json();
+}
+
+test("uploads are checked right away, and a bad file can be replaced before Merge", async (t) => {
+  withStubExiftool();
+  t.after(() => {
+    delete process.env.BRACKETLAB_ENGINE;
+    delete process.env.BRACKETLAB_EXIFTOOL;
+  });
+  const { id, cookie } = await newJob();
+
+  await upload(id, cookie, 0, arw(1 / 100));
+  let job = await status(id, cookie);
+  assert.deepEqual(job.inputs[0].exposure, { model: "ILCE-6100", shutter: "1/100s", iso: 100, fNumber: 8, focalLength: 16 });
+  assert.deepEqual(job.inputs[0].issues, []);
+  assert.equal(job.bracket.ready, false);
+  // The "needs three files" message is held back while files are still arriving.
+  assert.deepEqual(job.bracket.errors, []);
+
+  // A file ExifTool can't read is flagged against its own slot.
+  await upload(id, cookie, 1, "not a raw file");
+  job = await status(id, cookie);
+  assert.deepEqual(job.inputs[1].issues.map((i: { code: string }) => i.code), ["unsupported_format"]);
+  assert.match(job.inputs[1].issues[0].message, /^File 2 isn't a supported RAW file/);
+
+  // A third file with the same shutter speed as file 1.
+  await upload(id, cookie, 2, arw(1 / 100, { DateTimeOriginal: "x" }));
+  const rejected = await startJob(req(`/api/jobs/${id}/start`, cookie, { method: "POST" }), ctx({ id }));
+  assert.equal(rejected.status, 422);
+  job = await status(id, cookie);
+  assert.equal(job.state, "uploading");
+  assert.ok(job.error);
+
+  // Replacing both bad files fixes the bracket without starting over.
+  await upload(id, cookie, 1, arw(1 / 400));
+  await upload(id, cookie, 2, arw(1 / 25));
+  job = await status(id, cookie);
+  assert.equal(job.error, null, "replacing a file clears the old rejection");
+  assert.equal(job.bracket.ready, true);
+  assert.deepEqual(job.bracket.order, [
+    { slot: 1, evOffset: 0 },
+    { slot: 0, evOffset: 2 },
+    { slot: 2, evOffset: 4 },
+  ]);
+
+  const started = await startJob(req(`/api/jobs/${id}/start`, cookie, { method: "POST" }), ctx({ id }));
+  assert.equal(started.status, 202);
+});
+
+test("whole-bracket problems are reported once all three files are in", async (t) => {
+  withStubExiftool();
+  t.after(() => {
+    delete process.env.BRACKETLAB_ENGINE;
+    delete process.env.BRACKETLAB_EXIFTOOL;
+  });
+  const { id, cookie } = await newJob();
+  await upload(id, cookie, 0, arw(1 / 100));
+  await upload(id, cookie, 1, arw(1 / 400, { ISO: 400 }));
+  await upload(id, cookie, 2, arw(1 / 25));
+  const job = await status(id, cookie);
+  assert.equal(job.bracket.ready, false);
+  assert.deepEqual(job.bracket.errors.map((e: { code: string }) => e.code), ["iso_differs"]);
+  assert.deepEqual(job.inputs.flatMap((i: { issues: unknown[] }) => i.issues), []);
+});

@@ -6,8 +6,6 @@
 - Camera: **Sony a6100**. Actual RAW mode and sample metadata remain to be verified rather than inferred.
 - Editing workflow: **darktable and GIMP**. darktable is the primary HDR DNG/RAW editor; GIMP is a subsequent developed-image/retouching destination, not an equivalent test of RAW editing latitude. Document the supported darktable-to-GIMP handoff and bit depth/color profile.
 - Intended photographs: predominantly **static tripod shots** for landscapes, real estate, and product photography, plus occasional portraits. Tripod mounting does not freeze foliage, water, clouds, or people; motion limitations remain applicable.
-- Implementation owner: **Project Manager** (`project-manager`), who should coordinate the actual implementation and report completion back to Girl Friday for Ian's notification.
-- This session currently lacks `message_agent`; no assignment message has been sent and no implementation has begun here.
 
 ## 1. Executive summary
 

@@ -117,6 +117,7 @@ ENV NODE_ENV=production \
     HOSTNAME=0.0.0.0 \
     PORT=3000 \
     BRACKETLAB_DATA_DIR=/data \
+    BRACKETLAB_ENGINE=native \
     # See the hdrmerge-build stage: Qt aborts without a platform plugin.
     QT_QPA_PLATFORM=offscreen \
     HDRMERGE_COMMIT=${HDRMERGE_COMMIT} \

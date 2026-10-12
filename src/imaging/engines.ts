@@ -1,6 +1,8 @@
 import fsp from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
+import { DEFAULT_POLICY } from "./bracket";
 import { EngineError, type ImagingEngine } from "./engine";
+import { NativeEngine } from "./native";
 
 /**
  * Default until the Phase 0 toolchain (HDRMerge + darktable-cli) lands. Jobs fail with
@@ -59,6 +61,23 @@ export function engineFromEnv(): ImagingEngine {
       return new UnavailableEngine();
     case "fake":
       return new FakeEngine(Number(process.env.BRACKETLAB_FAKE_DELAY_MS ?? 1500));
+    case "native":
+      return new NativeEngine({
+        hdrmerge: process.env.BRACKETLAB_HDRMERGE ?? "hdrmerge",
+        darktableCli: process.env.BRACKETLAB_DARKTABLE_CLI ?? "darktable-cli",
+        exiftool: process.env.BRACKETLAB_EXIFTOOL ?? "exiftool",
+        policy: {
+          ...DEFAULT_POLICY,
+          supportedModels: process.env.BRACKETLAB_SUPPORTED_MODELS
+            ? process.env.BRACKETLAB_SUPPORTED_MODELS.split(",").map((m) => m.trim()).filter(Boolean)
+            : DEFAULT_POLICY.supportedModels,
+        },
+        // Set in the Docker image.
+        versions: {
+          hdrmerge: process.env.HDRMERGE_COMMIT ?? "unknown",
+          darktable: process.env.DARKTABLE_VERSION ?? "unknown",
+        },
+      });
     default:
       throw new Error(`Unknown BRACKETLAB_ENGINE "${name}"`);
   }

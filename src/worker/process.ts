@@ -10,6 +10,8 @@ export interface RunOptions {
   killGraceMs?: number;
   /** How much trailing stdout/stderr to keep for diagnostics. */
   maxOutputBytes?: number;
+  /** Exit codes that count as success. ExifTool, for one, exits 1 when any file fails. */
+  okExitCodes?: number[];
 }
 
 export interface RunResult {
@@ -57,7 +59,7 @@ class Tail {
  * die with it. Resolves only after the process has fully exited.
  */
 export function runProcess(command: string, args: string[], options: RunOptions): Promise<RunResult> {
-  const { signal, timeoutMs, killGraceMs = 5000, maxOutputBytes = 64 * 1024 } = options;
+  const { signal, timeoutMs, killGraceMs = 5000, maxOutputBytes = 64 * 1024, okExitCodes = [0] } = options;
 
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
@@ -119,7 +121,7 @@ export function runProcess(command: string, args: string[], options: RunOptions)
         reject(new ProcessError(`${command} timed out`, "timeout", code, sig, stderr.toString()));
       } else if (stopReason === "aborted") {
         reject(new ProcessError(`${command} was canceled`, "aborted", code, sig, stderr.toString()));
-      } else if (code !== 0) {
+      } else if (code === null || !okExitCodes.includes(code)) {
         reject(
           new ProcessError(
             `${command} exited with ${code ?? sig}`,

@@ -15,8 +15,8 @@ services:
     volumes:
       - bracketlab-data:/data
     environment:
-      # "unavailable" until the native engine adapter lands. "fake" is for UI testing only.
-      BRACKETLAB_ENGINE: unavailable
+      # Camera models to accept, as ExifTool reports them. "*" accepts any (untested) model.
+      BRACKETLAB_SUPPORTED_MODELS: ILCE-6100
     # Treat RAW decoders as an untrusted-file attack surface (PRD section 10).
     read_only: true
     tmpfs:

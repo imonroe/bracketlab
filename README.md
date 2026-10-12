@@ -4,11 +4,12 @@ Combine three bracketed RAW exposures (Sony ARW) into one editable floating-poin
 
 ## Status
 
-The web app, job model, queue and worker are in place. The Docker image now contains the native toolchain (HDRMerge built from source, darktable-cli 5.6.2, ExifTool), and it merges and renders an a6100 file headless. See [`docs/phase-0.md`](docs/phase-0.md) for findings and what's left before the go/no-go. The worker isn't wired to those tools yet, so it still uses one of two stand-in engines:
+The app merges for real. In the Docker image, the worker checks the bracket with ExifTool, merges it with HDRMerge into a 16-bit floating-point DNG, and renders a 2560px JPEG preview with darktable-cli 5.6.2. Identifying metadata is stripped from the JPEG. See [`docs/phase-0.md`](docs/phase-0.md) for what's still open before the Phase 0 go/no-go.
 
 | `BRACKETLAB_ENGINE` | Behaviour |
 | --- | --- |
-| `unavailable` (default) | Jobs fail with "the merge engine isn't installed". |
+| `native` (Docker default) | The real pipeline. Needs `hdrmerge`, `darktable-cli` and `exiftool` on PATH. |
+| `unavailable` (default outside Docker) | Jobs fail with "the merge engine isn't installed". |
 | `fake` | **Development only.** The "DNG" is a copy of the first input and the preview is a 1×1 placeholder. Use it to exercise the UI and job flow. |
 
 ## Running with Docker
@@ -85,10 +86,11 @@ plus: failed, canceled, expired
 | `BRACKETLAB_RETENTION_HOURS` | 24 |
 | `BRACKETLAB_UPLOAD_IDLE_MINUTES` | 60 (abandoned uploads expire) |
 | `BRACKETLAB_STAGE_TIMEOUT_SECONDS` | 600 |
-| `BRACKETLAB_ENGINE` | `unavailable` |
+| `BRACKETLAB_ENGINE` | `unavailable` (`native` in Docker) |
+| `BRACKETLAB_SUPPORTED_MODELS` | `ILCE-6100` (comma-separated; `*` accepts any) |
 
 ## Not yet built
 
-- The metadata preflight (camera model, ISO, aperture, exposure ordering) from PRD F2.
-- Worker adapter that drives HDRMerge and darktable-cli (per-job HOME, metadata stripping).
+- Showing the bracket check (camera, exposure spacing, warnings) in the UI before Merge. Today it runs in the worker, so problems surface as a failed job.
+- A decision on identifying metadata in the DNG (the camera serial survives the merge).
 - RAW fixture regression tests (they need real a6100 brackets).

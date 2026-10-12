@@ -57,6 +57,12 @@ test("abort kills the whole process group, including grandchildren", async () =>
   assert.equal(isAlive(grandchild), false);
 });
 
+test("listed non-zero exit codes count as success", async () => {
+  const { stdout } = await runProcess("sh", ["-c", "echo partial; exit 1"], { timeoutMs: 5000, okExitCodes: [0, 1] });
+  assert.equal(stdout.trim(), "partial");
+  await assert.rejects(runProcess("sh", ["-c", "exit 2"], { timeoutMs: 5000, okExitCodes: [0, 1] }));
+});
+
 test("timeout rejects", async () => {
   await assert.rejects(
     runProcess("sleep", ["10"], { timeoutMs: 100, killGraceMs: 100 }),

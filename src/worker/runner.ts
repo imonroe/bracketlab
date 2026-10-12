@@ -75,6 +75,12 @@ async function handleStopped(deps: RunnerDeps, jobId: string, paths: JobPaths): 
   await removeTree(paths.root);
 }
 
+/** Log fields for a failure: the message, plus native tool output when the engine kept it. */
+function errorFields(error: unknown): Record<string, unknown> {
+  const detail = (error as { logDetail?: unknown } | null)?.logDetail;
+  return typeof detail === "string" ? { error: String(error), detail } : { error: String(error) };
+}
+
 function userFacing(error: unknown, fallback: string): { code: string; message: string } {
   if (error instanceof EngineError) return { code: error.code, message: error.userMessage };
   return { code: "internal_error", message: fallback };
@@ -99,7 +105,7 @@ async function runMerge(deps: RunnerDeps, job: Job, paths: JobPaths): Promise<St
       await handleStopped(deps, job.id, paths);
       return "stopped";
     }
-    log("merge_failed", { jobId: job.id, engine: engine.name, ms: Date.now() - started, error: String(error) });
+    log("merge_failed", { jobId: job.id, engine: engine.name, ms: Date.now() - started, ...errorFields(error) });
     const { code, message } = userFacing(error, "The merge failed unexpectedly. Check that all three files come from one bracket and try again.");
     store.transition(job.id, "merging", "failed", { errorCode: code, errorMessage: message, retryable: false });
     await removeTree(paths.root);
@@ -136,7 +142,7 @@ async function runPreview(deps: RunnerDeps, job: Job, paths: JobPaths): Promise<
       await handleStopped(deps, job.id, paths);
       return;
     }
-    log("preview_failed", { jobId: job.id, engine: engine.name, ms: Date.now() - started, error: String(error) });
+    log("preview_failed", { jobId: job.id, engine: engine.name, ms: Date.now() - started, ...errorFields(error) });
     const { message } = userFacing(error, "The preview couldn't be rendered.");
     // The DNG is still good: keep it downloadable and allow a preview-only retry.
     store.transition(job.id, "rendering_preview", "raw_ready_preview_failed", {

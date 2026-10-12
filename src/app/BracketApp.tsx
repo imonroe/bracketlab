@@ -145,16 +145,26 @@ export function BracketApp() {
     return () => clearInterval(timer);
   }, [polling, refresh]);
 
-  const ensureJob = useCallback(async (): Promise<string | null> => {
-    if (jobIdRef.current) return jobIdRef.current;
-    const response = await fetch("/api/jobs", { method: "POST" });
-    if (!response.ok) {
-      setNotice(await readError(response));
-      return null;
-    }
-    const created: PublicJob = await response.json();
-    adoptJob(created);
-    return created.id;
+  // Several uploads can start in the same tick (a multi-file drop). They must share one
+  // job, so concurrent callers await the same creation request instead of each making one.
+  const creatingJobRef = useRef<Promise<string | null> | null>(null);
+  const ensureJob = useCallback((): Promise<string | null> => {
+    if (jobIdRef.current) return Promise.resolve(jobIdRef.current);
+    creatingJobRef.current ??= (async () => {
+      try {
+        const response = await fetch("/api/jobs", { method: "POST" });
+        if (!response.ok) {
+          setNotice(await readError(response));
+          return null;
+        }
+        const created: PublicJob = await response.json();
+        adoptJob(created);
+        return created.id;
+      } finally {
+        creatingJobRef.current = null;
+      }
+    })();
+    return creatingJobRef.current;
   }, [adoptJob]);
 
   const setSlot = (slot: number, view: SlotView) =>
@@ -326,7 +336,8 @@ export function BracketApp() {
       </ol>
 
       <div className={styles.status} role="status" aria-live="polite">
-        {notice && <p>{notice}</p>}
+        {/* A rejected start reports the same message the job now carries; show it once. */}
+        {notice && notice !== job?.error?.message && <p>{notice}</p>}
         {job && job.state !== "uploading" && (
           <p>
             <strong>{STATE_LABELS[job.state]}</strong>

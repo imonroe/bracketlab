@@ -1,6 +1,6 @@
 # Phase 0: imaging feasibility
 
-Status: **toolchain proven in the container; merge quality untested.** The go/no-go decision needs real a6100 brackets.
+Status: **the app merges end to end in the container; merge quality untested.** The go/no-go decision needs real a6100 brackets.
 
 ## Toolchain
 
@@ -32,10 +32,23 @@ Tested with one public a6100 sample (`DSC00033.ARW` from raw.pixls.us, CC0), pas
 2. **HDRMerge runs headless.** It links Qt Widgets and constructs a `QApplication` even in CLI mode, so it aborts without a display unless `QT_QPA_PLATFORM=offscreen` is set. With that set, it needs no X server.
 3. **The DNG looks right structurally.** DNG 1.4, 16-bit floating-point samples, CFA (mosaic) data, the camera colour matrix, and lens metadata all survive. The merge took 2 to 4 seconds on this host.
 4. **darktable-cli renders it headless.** About 5 seconds for a 2560px sRGB JPEG with an isolated config directory, an in-memory library and OpenCL disabled. The result has correct colour and orientation.
-5. **The tools need a writable HOME.** The service user has none. The worker must give each native process a scratch HOME and `XDG_RUNTIME_DIR` inside the job folder.
-6. **Privacy gap.** Both the DNG and the JPEG keep the camera's `InternalSerialNumber`. This sample has no GPS, so location tags are still unchecked. PRD section 10 requires stripping identifiers from the JPEG and a decision for the DNG.
+5. **The tools need a writable HOME.** The service user has none, so the worker gives each native process a scratch HOME and `XDG_RUNTIME_DIR` inside the job folder.
+6. **Privacy.** Both tools keep the camera's `InternalSerialNumber`. The engine now strips the JPEG; the DNG still carries it pending a policy decision. This sample has no GPS, so location tags are still unchecked.
 7. **Visible vignetting at 16mm.** darktable's defaults apply no lens correction. The DNG carries the lens model, so lens correction is possible. Whether the preview recipe should apply it is an open question.
 8. **HDRMerge white level.** With identical inputs it reported "Using white level 3445" rather than the sensor's 16383. That may be an artifact of feeding it the same exposure three times. Check it on a real bracket.
+
+## The native engine
+
+`BRACKETLAB_ENGINE=native` (the Docker default) runs, per job:
+
+1. **ExifTool bracket check** (`src/imaging/bracket.ts`): three ARW files from one supported camera, with fixed ISO, aperture and focal length, and three distinct shutter speeds. Missing exposure data is rejected rather than guessed. Frames are ordered dark to bright, and the EV spacing goes into the job manifest. A capture gap over 30 seconds is a warning.
+2. **HDRMerge** with `-p none -b 16`, alignment and crop on. HDRMerge **exits 0 even when it fails**: a shadowed variable in `Launcher.cpp` swallows the result. The engine therefore matches its two "Error loading" messages and validates the DNG with ExifTool (DNG version present, float samples, CFA data) instead of trusting the exit code.
+3. **darktable-cli** with a throwaway config directory, an in-memory library, no custom presets, OpenCL off, and JPEG quality 90.
+4. **ExifTool strips the JPEG** down to its ICC profile, colour space and orientation.
+
+Each tool gets a scratch HOME inside the job folder and nothing else from the worker's environment. Tool output goes to the worker log on failure, never to the user.
+
+A full a6100-sized job took about 8 seconds in the container: 3.6 s to merge and 4.6 s to render.
 
 ## Still needed for a go/no-go
 
@@ -43,7 +56,8 @@ Tested with one public a6100 sample (`DSC00033.ARW` from raw.pixls.us, CC0), pas
 - [ ] Open the merged DNGs in darktable 5.6.2 on the desktop and confirm highlight recovery and editing latitude.
 - [ ] Compare 16-bit and 32-bit float output on the clipped-highlight scene.
 - [ ] Decide the preview recipe: lens correction, exposure and tone mapping defaults.
-- [ ] Decide the DNG metadata policy and strip identifiers from the JPEG.
+- [x] Strip identifiers from the JPEG.
+- [ ] Decide the DNG metadata policy (the camera's `InternalSerialNumber` survives the merge).
 - [ ] Measure peak memory and time for a full-resolution bracket inside the 4-core, 8 GiB limit.
 
 ## Container notes

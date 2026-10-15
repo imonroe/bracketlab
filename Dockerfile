@@ -19,9 +19,10 @@ ARG HDRMERGE_COMMIT=2dbfd7d1e7d9060cff160663292b169f374010e1
 
 # darktable comes from the project's official openSUSE Build Service repository so it
 # matches the version used for DNG acceptance testing. Debian 13 itself ships 5.0.1.
-# OBS keeps only the latest build, so a rebuild there makes this exact pin fail loudly
-# rather than drift. Update it and rerun the smoke test when that happens.
-ARG DARKTABLE_VERSION=5.6.2-1.1+121.1
+# This pins the darktable release; OBS rebuilds the same release often (for example
+# 5.6.2-1.1+121.1, then +125.1) and keeps only the latest build, so the build suffix is
+# matched with a glob. A different release still fails the build loudly.
+ARG DARKTABLE_VERSION=5.6.2
 ARG DARKTABLE_REPO_FPR=3247B7519EDBEAB422E900A3040524A84C70D8B5
 
 # ---------------------------------------------------------------------------------------
@@ -93,7 +94,7 @@ RUN apt-get update \
       tini \
       libimage-exiftool-perl \
       libraw23t64 libexiv2-28 libqt5widgets5t64 libalglib4.2 zlib1g libgomp1 \
-      "darktable=${DARKTABLE_VERSION}" \
+      "darktable=${DARKTABLE_VERSION}-*" \
  && apt-get purge -y --auto-remove curl gnupg \
  && rm -rf /var/lib/apt/lists/*
 

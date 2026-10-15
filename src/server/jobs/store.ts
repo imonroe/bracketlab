@@ -27,6 +27,10 @@ export interface Job {
   dngBytes: number | null;
   jpegBytes: number | null;
   manifest: unknown;
+  /** Set when the job is one bracket of a batch. */
+  batchId: string | null;
+  /** Display and download name, e.g. "DSC01039-DSC01041". Batch jobs only. */
+  label: string | null;
 }
 
 export interface JobInput {
@@ -66,6 +70,8 @@ interface JobRow {
   dng_bytes: number | null;
   jpeg_bytes: number | null;
   manifest: string | null;
+  batch_id: string | null;
+  label: string | null;
 }
 
 interface InputRow {
@@ -95,6 +101,8 @@ function toJob(row: JobRow): Job {
     dngBytes: row.dng_bytes,
     jpegBytes: row.jpeg_bytes,
     manifest: row.manifest === null ? null : JSON.parse(row.manifest),
+    batchId: row.batch_id,
+    label: row.label,
   };
 }
 
@@ -132,6 +140,52 @@ export class JobStore {
       )
       .run(id, tokenHash, now, now, now, now + retentionMs);
     return this.get(id)!;
+  }
+
+  /**
+   * Creates one bracket of a submitted batch, already queued: its inputs were checked and
+   * matched before submission. Call inside the batch's submit transaction.
+   */
+  createBatchJob(job: {
+    id: string;
+    batchId: string;
+    tokenHash: string;
+    label: string;
+    expiresAt: number;
+    inputs: Omit<JobInput, "uploadedAt">[];
+  }): void {
+    const now = this.now();
+    this.db
+      .prepare(
+        `INSERT INTO jobs (id, token_hash, state, next_stage, created_at, updated_at, state_changed_at,
+                           queued_at, expires_at, batch_id, label)
+         VALUES (?, ?, 'queued', 'merge', ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(job.id, job.tokenHash, now, now, now, now, job.expiresAt, job.batchId, job.label);
+    const insert = this.db.prepare(
+      `INSERT INTO job_inputs (job_id, slot, original_name, bytes, sha256, uploaded_at, metadata, metadata_error)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    for (const input of job.inputs) {
+      insert.run(
+        job.id,
+        input.slot,
+        input.originalName,
+        input.bytes,
+        input.sha256,
+        now,
+        input.exposure === null ? null : JSON.stringify(input.exposure),
+        input.metadataError,
+      );
+    }
+  }
+
+  /** A batch's jobs, in the order they were created (capture order). */
+  forBatch(batchId: string): Job[] {
+    const rows = this.db
+      .prepare(`SELECT * FROM jobs WHERE batch_id = ? ORDER BY rowid`)
+      .all(batchId) as JobRow[];
+    return rows.map(toJob);
   }
 
   get(id: string): Job | undefined {
@@ -256,10 +310,14 @@ export class JobStore {
       .run(JSON.stringify(manifest), this.now(), id);
   }
 
+  /**
+   * Queued single-bracket jobs, for queue admission. Batch jobs are admitted per batch
+   * (see maxActiveBatches), so a batch of 40 sets doesn't lock out a quick single merge.
+   */
   countQueued(): number {
-    const row = this.db.prepare(`SELECT COUNT(*) AS n FROM jobs WHERE state = 'queued'`).get() as {
-      n: number;
-    };
+    const row = this.db
+      .prepare(`SELECT COUNT(*) AS n FROM jobs WHERE state = 'queued' AND batch_id IS NULL`)
+      .get() as { n: number };
     return row.n;
   }
 

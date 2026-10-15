@@ -12,6 +12,15 @@ The app merges for real. Each file is checked with ExifTool as soon as it upload
 | `unavailable` (default outside Docker) | Jobs fail with "the merge engine isn't installed". |
 | `fake` | **Development only.** The "DNG" is a copy of the first input and the preview is a 1×1 placeholder. Use it to exercise the UI and job flow. |
 
+### Batch mode
+
+`/batch` takes a whole shoot at once, for example a real-estate job with a bracket per room:
+
+1. **Upload** every RAW file. Each one's exposure and capture time are read as it arrives.
+2. **Matching** (`src/imaging/grouping.ts`) sorts the files by capture time and splits them into sets of three. Each set must pass the single-bracket check (one camera, fixed ISO, aperture and focal length, three distinct shutter speeds) and be shot within a minute. The matcher picks the split that places the most files, then the one with the tightest sets. A stray test shot is left out without shifting every set after it, and both camera bracket mode (frames a fraction of a second apart) and hand bracketing (a few seconds apart) work. Unevenly spaced exposures are flagged for review.
+3. **Review**: each set is listed with its files and exposures and an Include checkbox. Files that fit no set are listed with the reason.
+4. **Merge**: each included set becomes an ordinary job. One ZIP holds `<first>-<last>.dng` for every finished set, plus `previews/<first>-<last>.jpg`.
+
 ## Running with Docker
 
 ```sh
@@ -75,6 +84,15 @@ plus: failed, canceled, expired
 | `GET` | `/api/jobs/:id/artifacts/:kind` | Download `dng` or `jpeg` |
 | `DELETE` | `/api/jobs/:id` | Delete the job and all its files |
 | `GET` | `/api/health` | Readiness; fails if the worker heartbeat goes stale |
+| `POST` | `/api/batches` | Create a batch and set its capability cookie |
+| `POST` | `/api/batches/:id/files` | Stream one file into an open batch (`X-Filename` header) |
+| `DELETE` | `/api/batches/:id/files/:fileId` | Remove a file from an open batch |
+| `GET` | `/api/batches/:id` | Files, proposed sets and unplaced files while open; per-set jobs once submitted |
+| `POST` | `/api/batches/:id/submit` | `{ "include": [setKey, ...] }`: merge the reviewed sets |
+| `GET` | `/api/batches/:id/download` | ZIP of every finished set |
+| `GET` | `/api/batches/:id/sets/:jobId/:kind` | One set's `dng` or `jpeg` |
+| `POST` | `/api/batches/:id/sets/:jobId/retry` | Retry a set whose preview failed or that was interrupted |
+| `DELETE` | `/api/batches/:id` | Delete the batch, its sets and all their files |
 
 ### Configuration
 
@@ -82,7 +100,9 @@ plus: failed, canceled, expired
 | --- | --- |
 | `BRACKETLAB_DATA_DIR` | `./data` |
 | `BRACKETLAB_MAX_FILE_MIB` / `BRACKETLAB_MAX_JOB_MIB` | 200 / 600 |
-| `BRACKETLAB_MAX_QUEUED_JOBS` | 5 |
+| `BRACKETLAB_MAX_QUEUED_JOBS` | 5 (single brackets; batch sets don't count) |
+| `BRACKETLAB_MAX_BATCH_FILES` / `BRACKETLAB_MAX_BATCH_MIB` | 150 / 4096 |
+| `BRACKETLAB_MAX_ACTIVE_BATCHES` | 2 (batches merging at once) |
 | `BRACKETLAB_RETENTION_HOURS` | 24 |
 | `BRACKETLAB_UPLOAD_IDLE_MINUTES` | 60 (abandoned uploads expire) |
 | `BRACKETLAB_STAGE_TIMEOUT_SECONDS` | 600 |

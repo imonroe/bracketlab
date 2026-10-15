@@ -8,8 +8,13 @@ export interface AppConfig {
   dataDir: string;
   dbPath: string;
   jobsDir: string;
+  batchesDir: string;
   maxFileBytes: number;
   maxJobBytes: number;
+  maxBatchBytes: number;
+  maxBatchFiles: number;
+  /** Batches merging at once. Each one queues all its sets, so keep this small. */
+  maxActiveBatches: number;
   /** Maximum number of jobs waiting in the queue before new starts are refused. */
   maxQueuedJobs: number;
   retentionMs: number;
@@ -45,8 +50,12 @@ export function loadConfig(): AppConfig {
     dataDir,
     dbPath: path.join(dataDir, "bracketlab.sqlite"),
     jobsDir: path.join(dataDir, "jobs"),
+    batchesDir: path.join(dataDir, "batches"),
     maxFileBytes: intFromEnv("BRACKETLAB_MAX_FILE_MIB", 200) * MiB,
     maxJobBytes: intFromEnv("BRACKETLAB_MAX_JOB_MIB", 600) * MiB,
+    maxBatchBytes: intFromEnv("BRACKETLAB_MAX_BATCH_MIB", 4096) * MiB,
+    maxBatchFiles: intFromEnv("BRACKETLAB_MAX_BATCH_FILES", 150),
+    maxActiveBatches: intFromEnv("BRACKETLAB_MAX_ACTIVE_BATCHES", 2),
     maxQueuedJobs: intFromEnv("BRACKETLAB_MAX_QUEUED_JOBS", 5),
     retentionMs: intFromEnv("BRACKETLAB_RETENTION_HOURS", 24) * 60 * 60 * 1000,
     uploadIdleMs: intFromEnv("BRACKETLAB_UPLOAD_IDLE_MINUTES", 60) * 60 * 1000,

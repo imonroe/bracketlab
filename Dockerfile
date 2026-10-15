@@ -66,7 +66,7 @@ RUN cmake -S hdrmerge -B build \
 FROM ${NODE_BUILD_IMAGE} AS app-build
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm ci --no-audit --no-fund
 COPY . .
 RUN npm run build \
  && npm test

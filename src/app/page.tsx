@@ -1,4 +1,5 @@
 import { BracketApp } from "./BracketApp";
+import { Nav } from "./Nav";
 import styles from "./page.module.css";
 
 export default function Home() {
@@ -6,6 +7,7 @@ export default function Home() {
     <main className={styles.main}>
       <header className={styles.header}>
         <h1>BracketLab</h1>
+        <Nav current="single" />
         <p className={styles.lede}>
           Merge three bracketed RAW exposures into one editable HDR DNG, plus a JPEG preview.
         </p>

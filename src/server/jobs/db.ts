@@ -54,6 +54,34 @@ const MIGRATIONS: string[] = [
   ALTER TABLE job_inputs ADD COLUMN metadata TEXT;
   ALTER TABLE job_inputs ADD COLUMN metadata_error TEXT;
   `,
+  // Batches: a whole shoot uploaded at once, matched into brackets, each merged as a job.
+  `
+  CREATE TABLE batches (
+    id          TEXT PRIMARY KEY,
+    token_hash  TEXT NOT NULL,
+    state       TEXT NOT NULL CHECK (state IN ('open', 'submitted', 'expired')),
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL,
+    expires_at  INTEGER NOT NULL
+  );
+  CREATE INDEX batches_expires ON batches (expires_at);
+
+  CREATE TABLE batch_files (
+    id              TEXT PRIMARY KEY,
+    batch_id        TEXT NOT NULL REFERENCES batches (id) ON DELETE CASCADE,
+    original_name   TEXT NOT NULL,
+    bytes           INTEGER NOT NULL,
+    sha256          TEXT NOT NULL,
+    uploaded_at     INTEGER NOT NULL,
+    metadata        TEXT,
+    metadata_error  TEXT
+  );
+  CREATE INDEX batch_files_batch ON batch_files (batch_id);
+
+  ALTER TABLE jobs ADD COLUMN batch_id TEXT REFERENCES batches (id) ON DELETE CASCADE;
+  ALTER TABLE jobs ADD COLUMN label TEXT;
+  CREATE INDEX jobs_batch ON jobs (batch_id);
+  `,
 ];
 
 export function migrate(db: Db): void {

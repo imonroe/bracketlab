@@ -10,7 +10,7 @@ import { PUT as putInput } from "@/app/api/jobs/[id]/inputs/[slot]/route";
 import { POST as startJob } from "@/app/api/jobs/[id]/start/route";
 import { POST as cancelJob } from "@/app/api/jobs/[id]/cancel/route";
 import { GET as getArtifact } from "@/app/api/jobs/[id]/artifacts/[kind]/route";
-import { makeEnv, type TestEnv } from "./helpers";
+import { arwRecord, makeEnv, installStubExiftool, type TestEnv } from "./helpers";
 
 let env: TestEnv;
 
@@ -162,53 +162,20 @@ test("delete removes the job, its files and clears the cookie", async () => {
   assert.equal(getContext().store.get(id), undefined);
 });
 
-/**
- * With the native engine configured, uploads are checked with ExifTool. This stub treats
- * each uploaded file's contents as its ExifTool JSON record, so a test controls exactly
- * what each file reports; non-JSON contents behave like a file ExifTool can't read.
- */
-function withStubExiftool(): void {
-  const stub = `${env.dir}/exiftool-stub`;
-  fs.writeFileSync(
-    stub,
-    `#!/bin/bash
-for last; do :; done
-if body="$(cat "$last")" && printf '%s' "$body" | head -c1 | grep -q '{'; then
-  echo "[$body]"
-else
-  echo "[{\\"SourceFile\\": \\"$last\\"}]"; exit 1
-fi
-`,
-  );
-  fs.chmodSync(stub, 0o755);
-  process.env.BRACKETLAB_ENGINE = "native";
-  process.env.BRACKETLAB_EXIFTOOL = stub;
+function withStubExiftool(t: { after: (fn: () => void) => void }): void {
+  t.after(installStubExiftool(env.dir));
   resetConfig();
   resetContext();
 }
 
-const arw = (exposureTime: number, extra: Record<string, unknown> = {}) =>
-  JSON.stringify({
-    FileType: "ARW",
-    Make: "SONY",
-    Model: "ILCE-6100",
-    ISO: 100,
-    FNumber: 8,
-    FocalLength: 16,
-    ExposureTime: exposureTime,
-    ...extra,
-  });
+const arw = arwRecord;
 
 async function status(id: string, cookie: string) {
   return (await getJob(req(`/api/jobs/${id}`, cookie), ctx({ id }))).json();
 }
 
 test("uploads are checked right away, and a bad file can be replaced before Merge", async (t) => {
-  withStubExiftool();
-  t.after(() => {
-    delete process.env.BRACKETLAB_ENGINE;
-    delete process.env.BRACKETLAB_EXIFTOOL;
-  });
+  withStubExiftool(t);
   const { id, cookie } = await newJob();
 
   await upload(id, cookie, 0, arw(1 / 100));
@@ -250,11 +217,7 @@ test("uploads are checked right away, and a bad file can be replaced before Merg
 });
 
 test("whole-bracket problems are reported once all three files are in", async (t) => {
-  withStubExiftool();
-  t.after(() => {
-    delete process.env.BRACKETLAB_ENGINE;
-    delete process.env.BRACKETLAB_EXIFTOOL;
-  });
+  withStubExiftool(t);
   const { id, cookie } = await newJob();
   await upload(id, cookie, 0, arw(1 / 100));
   await upload(id, cookie, 1, arw(1 / 400, { ISO: 400 }));

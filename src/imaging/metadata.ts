@@ -13,9 +13,22 @@ interface ExifRecord {
   ExposureTime?: number;
   FocalLength?: number;
   DateTimeOriginal?: string;
+  SubSecDateTimeOriginal?: string;
 }
 
-const TAGS = ["FileType", "Make", "Model", "ISO", "FNumber", "ExposureTime", "FocalLength", "DateTimeOriginal"];
+const TAGS = [
+  "FileType",
+  "Make",
+  "Model",
+  "ISO",
+  "FNumber",
+  "ExposureTime",
+  "FocalLength",
+  "DateTimeOriginal",
+  // ExifTool composite: DateTimeOriginal plus SubSecTimeOriginal, needed to tell apart
+  // frames the camera fires a fraction of a second apart in bracket mode.
+  "SubSecDateTimeOriginal",
+];
 
 export interface ReadOptions {
   exiftool: string;
@@ -59,6 +72,6 @@ export async function readExposures(files: string[], options: ReadOptions): Prom
     fNumber: r.FNumber,
     exposureTime: r.ExposureTime,
     focalLength: r.FocalLength,
-    dateTimeOriginal: r.DateTimeOriginal,
+    dateTimeOriginal: r.SubSecDateTimeOriginal ?? r.DateTimeOriginal,
   }));
 }

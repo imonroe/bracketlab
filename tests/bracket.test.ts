@@ -94,6 +94,14 @@ test("three exposures must be distinct", () => {
   assert.deepEqual(codes(bracket([{ exposureTime: 1 / 400 }])), ["exposures_not_distinct"]);
 });
 
+test("unevenly spaced exposures are a warning, not an error", () => {
+  const result = checkBracket(bracket([{ exposureTime: 1 / 200 }]));
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(result.warnings.map((w) => w.code), ["uneven_spacing"]);
+  assert.match(result.warnings[0].message, /\+1 EV, then \+3 EV/);
+  assert.deepEqual(checkBracket(bracket()).warnings, []);
+});
+
 test("a long gap between shots is a warning, not an error", () => {
   const result = checkBracket(bracket([{}, {}, { dateTimeOriginal: "2026:10:12 10:05:00" }]));
   assert.deepEqual(result.errors, []);

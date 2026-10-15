@@ -56,3 +56,26 @@ export class JobPaths {
     return path.join(this.outputDir, "preview.jpg");
   }
 }
+
+/**
+ *   <batchesDir>/<batchId>/files/<fileId>.raw
+ *
+ * Files wait here until the batch is submitted, then move into their sets' job folders.
+ */
+export class BatchPaths {
+  readonly root: string;
+
+  constructor(batchesDir: string, batchId: string) {
+    if (!isJobId(batchId)) throw new Error("Invalid batch id");
+    this.root = path.join(batchesDir, batchId);
+  }
+
+  get filesDir(): string {
+    return path.join(this.root, "files");
+  }
+
+  file(fileId: string): string {
+    if (!isJobId(fileId)) throw new Error("Invalid file id");
+    return path.join(this.filesDir, `${fileId}.raw`);
+  }
+}

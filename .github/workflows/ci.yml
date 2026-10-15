@@ -1,0 +1,71 @@
+# Runs on every pull request, and on pushes to the long-lived branches so their state is
+# known too. Actions are pinned to full commit SHAs; the comment gives the release.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [dev, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to the same PR supersedes the run in progress.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Lint, typecheck, test, build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci --no-audit --no-fund
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  docker:
+    name: Docker image and toolchain smoke test
+    runs-on: ubuntu-24.04
+    # Building HDRMerge from source is the slow part; the layer cache keeps reruns quick.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # Catches what only the image can: an unavailable pinned darktable build (OBS keeps
+      # only the latest), a base image or HDRMerge commit that no longer builds, and the
+      # tests failing inside the image's own build stage.
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          load: true
+          tags: bracketlab:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test the toolchain
+        run: docker run --rm --read-only --tmpfs /tmp --cap-drop ALL bracketlab:ci smoke-test
+
+      - name: Start the app and check readiness
+        run: |
+          docker run -d --name bracketlab -p 127.0.0.1:3000:3000 --read-only --tmpfs /tmp \
+            --cap-drop ALL --security-opt no-new-privileges:true bracketlab:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3000/api/health; then echo; exit 0; fi
+            sleep 1
+          done
+          docker logs bracketlab
+          exit 1

@@ -50,6 +50,13 @@ npm run lint
 npm run build     # Next.js standalone server + dist/worker.mjs
 ```
 
+### Continuous integration
+
+`.github/workflows/ci.yml` runs on every pull request and on pushes to `dev` and `main`:
+
+- **Lint, typecheck, test, build**: the same commands as above, on Node 22.
+- **Docker image and toolchain smoke test**: builds the image (its build stage runs the tests too), runs `smoke-test` to check that HDRMerge, darktable-cli 5.6.2 and ExifTool start headless, then starts the app with the hardened flags and waits for `/api/health`. This catches problems only the image can show, such as darktable's build repository replacing the pinned build.
+
 ## How it fits together
 
 ```

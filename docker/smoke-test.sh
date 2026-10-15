@@ -35,6 +35,7 @@ dt_version="$(darktable-cli --version 2>&1 | head -1)"
 echo "darktable:   $dt_version"
 [ "$dt_version" = "darktable ${DARKTABLE_VERSION%%-*}" ] \
   || fail "expected darktable ${DARKTABLE_VERSION%%-*}, got: $dt_version"
+echo "  package:   $(dpkg-query -W -f='${Version}' darktable 2>/dev/null)"
 echo "exiftool:    $(exiftool -ver)"
 echo "libraw:      $(dpkg-query -W -f='${Version}' 'libraw23*' 2>/dev/null)"
 test -f "/usr/share/bracketlab/sources/hdrmerge-${HDRMERGE_COMMIT}.tar.gz" \

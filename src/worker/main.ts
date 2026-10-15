@@ -14,7 +14,7 @@ function log(event: string, fields: Record<string, unknown> = {}): void {
 }
 
 async function main(): Promise<void> {
-  const { store, config } = getContext();
+  const { store, batches, config } = getContext();
   const engine = engineFromEnv();
   const shutdown = new AbortController();
 
@@ -35,8 +35,8 @@ async function main(): Promise<void> {
   while (!shutdown.signal.aborted) {
     if (Date.now() >= nextJanitor) {
       try {
-        const report = await runJanitor(store, config);
-        if (report.expired.length || report.purged.length || report.orphans.length) {
+        const report = await runJanitor(store, config, batches);
+        if (report.expired.length || report.purged.length || report.orphans.length || report.expiredBatches.length) {
           log("janitor", { ...report });
         }
       } catch (error) {

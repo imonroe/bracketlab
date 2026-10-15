@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { PublicInput, PublicJob } from "@/server/jobs/service";
+import type { PublicJob } from "@/server/jobs/service";
+import { formatBytes, formatElapsed, formatEv, formatExposure, readError, sendFile } from "./client-utils";
 import styles from "./page.module.css";
 
 const STORAGE_KEY = "bracketlab.jobId";
@@ -34,69 +35,10 @@ const STATE_LABELS: Record<PublicJob["state"], string> = {
   expired: "Expired",
 };
 
-function formatBytes(bytes: number): string {
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function formatExposure(e: NonNullable<PublicInput["exposure"]>): string {
-  return [
-    e.shutter,
-    e.iso !== undefined && `ISO ${e.iso}`,
-    e.fNumber !== undefined && `f/${e.fNumber}`,
-    e.focalLength !== undefined && `${e.focalLength}mm`,
-  ]
-    .filter(Boolean)
-    .join(" · ");
-}
-
-function formatEv(ev: number): string {
-  return ev === 0 ? "0 EV" : `+${ev} EV`;
-}
-
-function formatElapsed(ms: number): string {
-  const s = Math.max(0, Math.floor(ms / 1000));
-  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
-}
-
-async function readError(response: Response): Promise<string> {
-  try {
-    const body = await response.json();
-    return body?.error?.message ?? `Request failed (${response.status}).`;
-  } catch {
-    return `Request failed (${response.status}).`;
-  }
-}
-
 function slotsFromJob(job: PublicJob): SlotView[] {
   return SLOTS.map((slot) => {
     const input = job.inputs.find((i) => i.slot === slot);
     return input ? { status: "done", name: input.name, bytes: input.bytes } : { status: "empty" };
-  });
-}
-
-/** PUT with upload progress. fetch() has no upload progress events, so this uses XHR. */
-function uploadFile(
-  jobId: string,
-  slot: number,
-  file: File,
-  onProgress: (loaded: number) => void,
-): Promise<{ ok: true } | { ok: false; message: string }> {
-  return new Promise((resolve) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open("PUT", `/api/jobs/${jobId}/inputs/${slot}`);
-    xhr.setRequestHeader("x-filename", encodeURIComponent(file.name));
-    xhr.upload.onprogress = (e) => onProgress(e.loaded);
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) return resolve({ ok: true });
-      let message = `Upload failed (${xhr.status}).`;
-      try {
-        message = JSON.parse(xhr.responseText)?.error?.message ?? message;
-      } catch {}
-      resolve({ ok: false, message });
-    };
-    xhr.onerror = () => resolve({ ok: false, message: "Upload interrupted. Try again." });
-    xhr.send(file);
   });
 }
 
@@ -191,7 +133,7 @@ export function BracketApp() {
       const id = await ensureJob();
       if (!id) return;
       setSlot(slot, { status: "uploading", name: file.name, bytes: file.size, loaded: 0 });
-      const result = await uploadFile(id, slot, file, (loaded) =>
+      const result = await sendFile("PUT", `/api/jobs/${id}/inputs/${slot}`, file, (loaded) =>
         setSlot(slot, { status: "uploading", name: file.name, bytes: file.size, loaded }),
       );
       setSlot(

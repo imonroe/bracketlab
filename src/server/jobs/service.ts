@@ -41,7 +41,7 @@ export interface PublicInput {
   issues: PreflightIssue[];
 }
 
-function publicExposure(e: FileExposure | null): PublicInput["exposure"] {
+export function publicExposure(e: FileExposure | null): PublicInput["exposure"] {
   if (!e) return null;
   return {
     model: e.model,
@@ -106,9 +106,9 @@ export function authorize(store: JobStore, request: Request, jobId: string): Job
 const MAX_NAME_LENGTH = 255;
 
 /** Display name from the X-Filename header. Used for UI only, never for paths. */
-function displayName(request: Request, slot: InputSlot): string {
+export function uploadDisplayName(request: Request, fallback: string): string {
   const raw = request.headers.get("x-filename");
-  let name = `input-${slot + 1}`;
+  let name = fallback;
   if (raw) {
     try {
       name = decodeURIComponent(raw);
@@ -117,7 +117,7 @@ function displayName(request: Request, slot: InputSlot): string {
     }
   }
   // Strip control characters so names are safe to render and log.
-  return name.replace(/[\u0000-\u001f\u007f]/g, "").slice(0, MAX_NAME_LENGTH) || `input-${slot + 1}`;
+  return name.replace(/[\u0000-\u001f\u007f]/g, "").slice(0, MAX_NAME_LENGTH) || fallback;
 }
 
 export async function uploadInput(
@@ -175,7 +175,7 @@ export async function uploadInput(
   try {
     return store.putInput(job.id, {
       slot,
-      originalName: displayName(request, slot),
+      originalName: uploadDisplayName(request, `input-${slot + 1}`),
       ...written,
       exposure,
       metadataError,

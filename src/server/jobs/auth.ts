@@ -2,12 +2,15 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 
 /**
  * Each job gets a random capability token when it is created. Only its SHA-256 hash is
- * stored. The browser holds the token in an HttpOnly cookie scoped to that job's API
- * path, so downloads work as ordinary links without putting the token in a URL.
+ * stored. The browser holds the token in an HttpOnly cookie scoped to that job's (or
+ * batch's) API path, so downloads work as ordinary links without putting the token in a URL.
  * Non-browser clients may send it as `Authorization: Bearer <token>` instead.
  */
 
-const COOKIE_PREFIX = "bl_job_";
+/** What a capability token grants access to; also the API path segment it is scoped to. */
+export type Scope = "jobs" | "batches";
+
+const COOKIE_PREFIX: Record<Scope, string> = { jobs: "bl_job_", batches: "bl_batch_" };
 
 export function generateToken(): string {
   return randomBytes(32).toString("base64url");
@@ -23,8 +26,8 @@ export function tokenMatches(token: string, storedHash: string): boolean {
   return candidate.length === stored.length && timingSafeEqual(candidate, stored);
 }
 
-export function cookieName(jobId: string): string {
-  return `${COOKIE_PREFIX}${jobId}`;
+export function cookieName(id: string, scope: Scope = "jobs"): string {
+  return `${COOKIE_PREFIX[scope]}${id}`;
 }
 
 function readCookie(header: string | null, name: string): string | undefined {
@@ -37,11 +40,11 @@ function readCookie(header: string | null, name: string): string | undefined {
   return undefined;
 }
 
-/** Extracts the presented token for a job from the Authorization header or job cookie. */
-export function presentedToken(request: Request, jobId: string): string | undefined {
+/** Extracts the presented token from the Authorization header or the scoped cookie. */
+export function presentedToken(request: Request, id: string, scope: Scope = "jobs"): string | undefined {
   const auth = request.headers.get("authorization");
   if (auth?.startsWith("Bearer ")) return auth.slice("Bearer ".length).trim();
-  return readCookie(request.headers.get("cookie"), cookieName(jobId));
+  return readCookie(request.headers.get("cookie"), cookieName(id, scope));
 }
 
 function isSecureRequest(request: Request): boolean {
@@ -50,10 +53,10 @@ function isSecureRequest(request: Request): boolean {
   return new URL(request.url).protocol === "https:";
 }
 
-export function buildJobCookie(request: Request, jobId: string, token: string, maxAgeMs: number): string {
+export function buildCookie(request: Request, scope: Scope, id: string, token: string, maxAgeMs: number): string {
   const parts = [
-    `${cookieName(jobId)}=${token}`,
-    `Path=/api/jobs/${jobId}`,
+    `${cookieName(id, scope)}=${token}`,
+    `Path=/api/${scope}/${id}`,
     `Max-Age=${Math.floor(maxAgeMs / 1000)}`,
     "HttpOnly",
     "SameSite=Strict",
@@ -62,6 +65,14 @@ export function buildJobCookie(request: Request, jobId: string, token: string, m
   return parts.join("; ");
 }
 
+export function clearCookie(scope: Scope, id: string): string {
+  return `${cookieName(id, scope)}=; Path=/api/${scope}/${id}; Max-Age=0; HttpOnly; SameSite=Strict`;
+}
+
+export function buildJobCookie(request: Request, jobId: string, token: string, maxAgeMs: number): string {
+  return buildCookie(request, "jobs", jobId, token, maxAgeMs);
+}
+
 export function clearJobCookie(jobId: string): string {
-  return `${cookieName(jobId)}=; Path=/api/jobs/${jobId}; Max-Age=0; HttpOnly; SameSite=Strict`;
+  return clearCookie("jobs", jobId);
 }

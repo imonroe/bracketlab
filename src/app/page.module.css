@@ -12,6 +12,27 @@
   letter-spacing: -0.02em;
 }
 
+.nav {
+  display: flex;
+  gap: 4px;
+  margin: 8px 0 4px;
+}
+
+.nav a {
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--foreground);
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+
+.nav a[aria-current="page"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+
 .lede {
   margin-top: 4px;
   color: var(--muted);
@@ -111,6 +132,81 @@
 
 .warning {
   color: var(--warning);
+}
+
+.subheading {
+  font-size: 1rem;
+  margin-top: 4px;
+}
+
+.sets {
+  list-style: none;
+  display: grid;
+  gap: 8px;
+}
+
+.setCard {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.setExcluded {
+  opacity: 0.55;
+}
+
+.setHeader {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.setHeader input {
+  width: 18px;
+  height: 18px;
+}
+
+.setResult {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  gap: 12px;
+  align-items: start;
+}
+
+.setBody {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.thumb,
+.thumbPlaceholder {
+  width: 96px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: 6px;
+  background: var(--border);
+  display: block;
+}
+
+.unplaced {
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+
+.unplaced li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
 }
 
 .progress {

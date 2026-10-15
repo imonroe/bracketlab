@@ -6,6 +6,8 @@
 export interface ExposureInfo {
   /** Index into the input list, so results can be mapped back to slots. */
   index: number;
+  /** How messages name this file. Defaults to "File <index + 1>". */
+  label?: string;
   fileType?: string;
   make?: string;
   model?: string;
@@ -14,7 +16,7 @@ export interface ExposureInfo {
   /** Seconds. */
   exposureTime?: number;
   focalLength?: number;
-  /** ExifTool format, "YYYY:MM:DD HH:MM:SS". */
+  /** ExifTool format, "YYYY:MM:DD HH:MM:SS", with sub-seconds when the camera records them. */
   dateTimeOriginal?: string;
 }
 
@@ -54,8 +56,8 @@ export function bracketPolicyFromEnv(env: Record<string, string | undefined> = p
 
 const RAW_TYPES = new Set(["ARW"]);
 
-function frame(i: number): string {
-  return `File ${i + 1}`;
+function frame(f: ExposureInfo): string {
+  return f.label ?? `File ${f.index + 1}`;
 }
 
 function distinct<T>(values: T[]): T[] {
@@ -67,11 +69,16 @@ function allClose(values: number[], tolerance = 0.01): boolean {
   return values.every((v) => Math.abs(v - values[0]) <= Math.abs(values[0]) * tolerance);
 }
 
-function parseExifDate(value: string | undefined): number | undefined {
-  const m = value?.match(/^(\d{4}):(\d{2}):(\d{2}) (\d{2}):(\d{2}):(\d{2})/);
+/**
+ * Milliseconds from an ExifTool date, "YYYY:MM:DD HH:MM:SS[.fff][+hh:mm]". The zone is
+ * ignored: frames from one camera share it, and only differences matter here.
+ */
+export function parseExifDate(value: string | undefined): number | undefined {
+  const m = value?.match(/^(\d{4}):(\d{2}):(\d{2}) (\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?/);
   if (!m) return undefined;
-  const [, y, mo, d, h, mi, s] = m.map(Number);
-  return Date.UTC(y, mo - 1, d, h, mi, s);
+  const [y, mo, d, h, mi, s] = m.slice(1, 7).map(Number);
+  const fraction = m[7] ? Number(`0.${m[7]}`) * 1000 : 0;
+  return Date.UTC(y, mo - 1, d, h, mi, s) + Math.round(fraction);
 }
 
 export function formatShutter(seconds: number): string {
@@ -87,7 +94,7 @@ export function checkFrame(f: ExposureInfo, policy: BracketPolicy = DEFAULT_POLI
     return [
       {
         code: "unsupported_format",
-        message: `${frame(f.index)} isn't a supported RAW file${f.fileType ? ` (it looks like ${f.fileType})` : ""}. Upload Sony ARW files.`,
+        message: `${frame(f)} isn't a supported RAW file${f.fileType ? ` (it looks like ${f.fileType})` : ""}. Upload Sony ARW files.`,
       },
     ];
   }
@@ -96,13 +103,13 @@ export function checkFrame(f: ExposureInfo, policy: BracketPolicy = DEFAULT_POLI
   if (!policy.supportedModels.includes("*") && !policy.supportedModels.includes(model)) {
     issues.push({
       code: "unsupported_camera",
-      message: `${frame(f.index)} comes from ${model || "an unknown camera"}, which hasn't been tested with BracketLab yet. Supported: ${policy.supportedModels.join(", ")}.`,
+      message: `${frame(f)} comes from ${model || "an unknown camera"}, which hasn't been tested with BracketLab yet. Supported: ${policy.supportedModels.join(", ")}.`,
     });
   }
   if (f.exposureTime === undefined || f.iso === undefined || f.fNumber === undefined) {
     issues.push({
       code: "missing_exposure",
-      message: `${frame(f.index)} is missing its shutter speed, ISO or aperture, so the exposures can't be ordered.`,
+      message: `${frame(f)} is missing its shutter speed, ISO or aperture, so the exposures can't be ordered.`,
     });
   }
   return issues;
@@ -160,6 +167,16 @@ export function checkBracket(frames: ExposureInfo[], policy: BracketPolicy = DEF
     }
   }
   if (errors.length > 0) return result(order, evOffsets);
+
+  // Camera brackets step evenly (±1, ±2, ±3 EV). Uneven steps usually mean frames from
+  // different brackets got matched together, but hand bracketing can be uneven, so warn.
+  const steps = evOffsets.slice(1).map((ev, i) => Math.round((ev - evOffsets[i]) * 10) / 10);
+  if (Math.max(...steps) - Math.min(...steps) > 0.5) {
+    warnings.push({
+      code: "uneven_spacing",
+      message: `The exposures are spaced unevenly (${steps.map((s) => `+${s} EV`).join(", then ")}). Check these shots belong to the same bracket.`,
+    });
+  }
 
   const stamps = frames.map((f) => parseExifDate(f.dateTimeOriginal));
   if (stamps.every((s): s is number => s !== undefined)) {

@@ -8,6 +8,7 @@
   --accent-soft: #e6eefa;
   --on-accent: #ffffff;
   --danger: #b3261e;
+  --warning: #8a5a00;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -21,6 +22,7 @@
     --accent-soft: #1d2a3d;
     --on-accent: #0d1626;
     --danger: #f2877f;
+    --warning: #e3b45c;
   }
 
   html {

@@ -1,4 +1,5 @@
 import path from "node:path";
+import { bracketPolicyFromEnv, type BracketPolicy } from "@/imaging/bracket";
 
 const MiB = 1024 * 1024;
 
@@ -20,6 +21,11 @@ export interface AppConfig {
   janitorIntervalMs: number;
   /** The health check fails when the worker heartbeat is older than this. */
   workerStaleMs: number;
+  /**
+   * Reading exposure metadata at upload, which needs ExifTool. On with the native engine;
+   * off for the fake and unavailable engines, which then get structural checks only.
+   */
+  metadata: { exiftool: string; policy: BracketPolicy; timeoutMs: number } | null;
 }
 
 function intFromEnv(name: string, fallback: number): number {
@@ -48,6 +54,14 @@ export function loadConfig(): AppConfig {
     workerPollMs: intFromEnv("BRACKETLAB_WORKER_POLL_MS", 1000),
     janitorIntervalMs: intFromEnv("BRACKETLAB_JANITOR_INTERVAL_SECONDS", 300) * 1000,
     workerStaleMs: intFromEnv("BRACKETLAB_WORKER_STALE_SECONDS", 30) * 1000,
+    metadata:
+      (process.env.BRACKETLAB_ENGINE ?? "unavailable") === "native"
+        ? {
+            exiftool: process.env.BRACKETLAB_EXIFTOOL ?? "exiftool",
+            policy: bracketPolicyFromEnv(),
+            timeoutMs: 30_000,
+          }
+        : null,
   };
 }
 

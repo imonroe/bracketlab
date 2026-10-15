@@ -33,7 +33,7 @@ Tested with one public a6100 sample (`DSC00033.ARW` from raw.pixls.us, CC0), pas
 3. **The DNG looks right structurally.** DNG 1.4, 16-bit floating-point samples, CFA (mosaic) data, the camera colour matrix, and lens metadata all survive. The merge took 2 to 4 seconds on this host.
 4. **darktable-cli renders it headless.** About 5 seconds for a 2560px sRGB JPEG with an isolated config directory, an in-memory library and OpenCL disabled. The result has correct colour and orientation.
 5. **The tools need a writable HOME.** The service user has none, so the worker gives each native process a scratch HOME and `XDG_RUNTIME_DIR` inside the job folder.
-6. **Privacy.** Both tools keep the camera's `InternalSerialNumber`. The engine now strips the JPEG; the DNG still carries it pending a policy decision. This sample has no GPS, so location tags are still unchecked.
+6. **Privacy.** Both tools keep the camera's `InternalSerialNumber`, so the engine strips both outputs (see below). This sample has no GPS, so location stripping is untested on a real geotagged file.
 7. **Visible vignetting at 16mm.** darktable's defaults apply no lens correction. The DNG carries the lens model, so lens correction is possible. Whether the preview recipe should apply it is an open question.
 8. **HDRMerge white level.** With identical inputs it reported "Using white level 3445" rather than the sensor's 16383. That may be an artifact of feeding it the same exposure three times. Check it on a real bracket.
 
@@ -41,10 +41,10 @@ Tested with one public a6100 sample (`DSC00033.ARW` from raw.pixls.us, CC0), pas
 
 `BRACKETLAB_ENGINE=native` (the Docker default) runs, per job:
 
-1. **ExifTool bracket check** (`src/imaging/bracket.ts`): three ARW files from one supported camera, with fixed ISO, aperture and focal length, and three distinct shutter speeds. Missing exposure data is rejected rather than guessed. Frames are ordered dark to bright, and the EV spacing goes into the job manifest. A capture gap over 30 seconds is a warning.
+1. **ExifTool bracket check** (`src/imaging/bracket.ts`), at upload and again in the worker: three ARW files from one supported camera, with fixed ISO, aperture and focal length, and three distinct shutter speeds. Missing exposure data is rejected rather than guessed. Frames are ordered dark to bright, and the EV spacing goes into the job manifest. A capture gap over 30 seconds is a warning.
 2. **HDRMerge** with `-p none -b 16`, alignment and crop on. HDRMerge **exits 0 even when it fails**: a shadowed variable in `Launcher.cpp` swallows the result. The engine therefore matches its two "Error loading" messages and validates the DNG with ExifTool (DNG version present, float samples, CFA data) instead of trusting the exit code.
 3. **darktable-cli** with a throwaway config directory, an in-memory library, no custom presets, OpenCL off, and JPEG quality 90.
-4. **ExifTool strips the JPEG** down to its ICC profile, colour space and orientation.
+4. **ExifTool strips both outputs.** The JPEG keeps only its ICC profile, colour space and orientation. The DNG loses GPS, serial and owner tags and Sony's whole maker-note block: Sony stores the camera's `InternalSerialNumber` in an enciphered maker-note tag that ExifTool can read but not edit, so the block has to go. Colour calibration lives in standard DNG tags and is byte-identical afterwards, darktable renders the stripped DNG pixel-identically, and the lens model stays in standard EXIF. The cost is Sony's private lens-distortion data. The worker re-reads the DNG after stripping and fails the job if a serial number survives.
 
 Each tool gets a scratch HOME inside the job folder and nothing else from the worker's environment. Tool output goes to the worker log on failure, never to the user.
 
@@ -57,7 +57,7 @@ A full a6100-sized job took about 8 seconds in the container: 3.6 s to merge and
 - [ ] Compare 16-bit and 32-bit float output on the clipped-highlight scene.
 - [ ] Decide the preview recipe: lens correction, exposure and tone mapping defaults.
 - [x] Strip identifiers from the JPEG.
-- [ ] Decide the DNG metadata policy (the camera's `InternalSerialNumber` survives the merge).
+- [x] Strip identifiers from the DNG (decided: remove them, including Sony's maker notes).
 - [ ] Measure peak memory and time for a full-resolution bracket inside the 4-core, 8 GiB limit.
 
 ## Container notes

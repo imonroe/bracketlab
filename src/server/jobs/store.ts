@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { FileExposure } from "@/imaging/metadata";
 import type { Db } from "./db";
 import {
   ACTIVE_STATES,
@@ -34,6 +35,10 @@ export interface JobInput {
   bytes: number;
   sha256: string;
   uploadedAt: number;
+  /** Exposure tags read at upload. Null when metadata reading is off or failed. */
+  exposure: FileExposure | null;
+  /** Why the metadata couldn't be read, when it couldn't. */
+  metadataError: string | null;
 }
 
 /** Optional column updates applied together with a state transition. */
@@ -69,6 +74,8 @@ interface InputRow {
   bytes: number;
   sha256: string;
   uploaded_at: number;
+  metadata: string | null;
+  metadata_error: string | null;
 }
 
 function toJob(row: JobRow): Job {
@@ -98,6 +105,8 @@ function toInput(row: InputRow): JobInput {
     bytes: row.bytes,
     sha256: row.sha256,
     uploadedAt: row.uploaded_at,
+    exposure: row.metadata === null ? null : (JSON.parse(row.metadata) as FileExposure),
+    metadataError: row.metadata_error,
   };
 }
 
@@ -138,28 +147,49 @@ export class JobStore {
   }
 
   /** Records (or replaces) an uploaded input. Only valid while the job is uploading. */
-  putInput(id: string, input: Omit<JobInput, "uploadedAt">): JobInput {
+  putInput(
+    id: string,
+    input: Omit<JobInput, "uploadedAt" | "exposure" | "metadataError"> &
+      Partial<Pick<JobInput, "exposure" | "metadataError">>,
+  ): JobInput {
     const now = this.now();
+    const exposure = input.exposure ?? null;
+    const metadataError = input.metadataError ?? null;
     const result = this.db.transaction(() => {
       const touched = this.db
-        .prepare(`UPDATE jobs SET updated_at = ? WHERE id = ? AND state = 'uploading'`)
+        // A new file supersedes any earlier start rejection; the live check replaces it.
+        .prepare(
+          `UPDATE jobs SET updated_at = ?, error_code = NULL, error_message = NULL
+           WHERE id = ? AND state = 'uploading'`,
+        )
         .run(now, id);
       if (touched.changes === 0) return false;
       this.db
         .prepare(
-          `INSERT INTO job_inputs (job_id, slot, original_name, bytes, sha256, uploaded_at)
-           VALUES (?, ?, ?, ?, ?, ?)
+          `INSERT INTO job_inputs (job_id, slot, original_name, bytes, sha256, uploaded_at, metadata, metadata_error)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT (job_id, slot) DO UPDATE SET
              original_name = excluded.original_name,
              bytes = excluded.bytes,
              sha256 = excluded.sha256,
-             uploaded_at = excluded.uploaded_at`,
+             uploaded_at = excluded.uploaded_at,
+             metadata = excluded.metadata,
+             metadata_error = excluded.metadata_error`,
         )
-        .run(id, input.slot, input.originalName, input.bytes, input.sha256, now);
+        .run(
+          id,
+          input.slot,
+          input.originalName,
+          input.bytes,
+          input.sha256,
+          now,
+          exposure === null ? null : JSON.stringify(exposure),
+          metadataError,
+        );
       return true;
     })();
     if (!result) throw new Error(`Job ${id} is not accepting uploads`);
-    return { ...input, uploadedAt: now };
+    return { ...input, uploadedAt: now, exposure, metadataError };
   }
 
   /**

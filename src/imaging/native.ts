@@ -1,8 +1,9 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
 import { ProcessError, runProcess } from "@/worker/process";
-import { checkBracket, type BracketPolicy, type ExposureInfo } from "./bracket";
+import { checkBracket, type BracketPolicy } from "./bracket";
 import { EngineError, type ImagingEngine, type MergeRequest, type MergeResult, type PreviewRequest } from "./engine";
+import { MetadataUnreadableError, readExposures } from "./metadata";
 
 /**
  * The real pipeline: ExifTool for bracket checks, HDRMerge for the RAW-domain merge into
@@ -81,14 +82,8 @@ function asEngineError(error: unknown, stage: "merge" | "preview", timeoutMs: nu
 }
 
 interface ExifRecord {
-  FileType?: string;
-  Make?: string;
-  Model?: string;
-  ISO?: number;
-  FNumber?: number;
-  ExposureTime?: number;
-  FocalLength?: number;
-  DateTimeOriginal?: string;
+  InternalSerialNumber?: string;
+  SerialNumber?: string;
   SampleFormat?: number | number[];
   PhotometricInterpretation?: number;
   DNGVersion?: string;
@@ -99,9 +94,8 @@ export class NativeEngine implements ImagingEngine {
 
   constructor(private readonly options: NativeEngineOptions) {}
 
+  /** Reads tags from the merged DNG. */
   private async exif(files: string[], tags: string[], env: Record<string, string | undefined>, signal: AbortSignal, timeoutMs: number): Promise<ExifRecord[]> {
-    // Exit 1 means at least one file couldn't be read; its record then has no tags, which
-    // the bracket check reports per file.
     const { stdout, stderr } = await runProcess(
       this.options.exiftool,
       ["-json", "-n", ...tags.map((t) => `-${t}`), "--", ...files],
@@ -122,30 +116,17 @@ export class NativeEngine implements ImagingEngine {
   async merge({ inputs, output, workDir, signal, timeoutMs }: MergeRequest): Promise<MergeResult> {
     const env = await toolEnv(workDir);
 
-    let records: ExifRecord[];
+    let frames;
     try {
-      records = await this.exif(
-        inputs,
-        ["FileType", "Make", "Model", "ISO", "FNumber", "ExposureTime", "FocalLength", "DateTimeOriginal"],
-        env,
-        signal,
-        timeoutMs,
+      frames = (await readExposures(inputs, { exiftool: this.options.exiftool, env, signal, timeoutMs })).map(
+        (f, index) => ({ ...f, index }),
       );
     } catch (error) {
+      if (error instanceof MetadataUnreadableError) {
+        throw new NativeEngineError("metadata_unreadable", "BracketLab couldn't read the files' metadata.", tail(error.stderr));
+      }
       throw asEngineError(error, "merge", timeoutMs);
     }
-
-    const frames: ExposureInfo[] = records.map((r, index) => ({
-      index,
-      fileType: r.FileType,
-      make: r.Make,
-      model: r.Model,
-      iso: r.ISO,
-      fNumber: r.FNumber,
-      exposureTime: r.ExposureTime,
-      focalLength: r.FocalLength,
-      dateTimeOriginal: r.DateTimeOriginal,
-    }));
     const bracket = checkBracket(frames, this.options.policy);
     if (bracket.errors.length > 0) {
       throw new NativeEngineError(bracket.errors[0].code, bracket.errors.map((e) => e.message).join(" "));
@@ -165,7 +146,10 @@ export class NativeEngine implements ImagingEngine {
     // HDRMerge exits 0 even when it rejects its inputs; the only reliable signal is
     // whether it wrote a valid DNG.
     const log = `${run.stdout}\n${run.stderr}`;
-    await this.validateDng(output, env, signal, timeoutMs, log);
+    await this.checkHdrmergeOutput(output, log);
+    await this.stripDng(output, env, signal, timeoutMs);
+    // Validate after stripping, so a damaged file can never be published.
+    await this.validateDng(output, env, signal, timeoutMs);
 
     const frame = (i: number) => frames[i];
     return {
@@ -188,13 +172,8 @@ export class NativeEngine implements ImagingEngine {
     };
   }
 
-  private async validateDng(
-    file: string,
-    env: Record<string, string | undefined>,
-    signal: AbortSignal,
-    timeoutMs: number,
-    hdrmergeLog: string,
-  ): Promise<void> {
+  /** HDRMerge exits 0 even when it rejects its inputs, so read its log and check the file. */
+  private async checkHdrmergeOutput(file: string, hdrmergeLog: string): Promise<void> {
     // HDRMerge's only load errors (Launcher.cpp). It reports any decode failure as
     // "file not found", and exits 0 either way because of a shadowed result variable.
     if (/^Error loading .*, it has a different format\./m.test(hdrmergeLog)) {
@@ -216,10 +195,58 @@ export class NativeEngine implements ImagingEngine {
     } catch {
       throw new NativeEngineError("merge_failed", "HDRMerge finished without writing a DNG.", tail(hdrmergeLog));
     }
+  }
 
+  /**
+   * PRD section 10. Sony keeps the camera's internal serial number inside an enciphered
+   * maker-note block that ExifTool can read but not edit, so the whole Sony maker note
+   * goes. Colour calibration lives in standard DNG tags and is untouched; the lens model
+   * stays in standard EXIF. Removing it does drop Sony's private lens-distortion data.
+   */
+  private async stripDng(
+    file: string,
+    env: Record<string, string | undefined>,
+    signal: AbortSignal,
+    timeoutMs: number,
+  ): Promise<void> {
+    try {
+      await runProcess(
+        this.options.exiftool,
+        [
+          "-overwrite_original",
+          "-MakerNotes:all=",
+          "-GPS:all=",
+          "-SerialNumber=",
+          "-LensSerialNumber=",
+          "-CameraSerialNumber=",
+          "-OwnerName=",
+          "-Artist=",
+          "-ImageUniqueID=",
+          "--",
+          file,
+        ],
+        { env, signal, timeoutMs },
+      );
+    } catch (error) {
+      throw asEngineError(error, "merge", timeoutMs);
+    }
+  }
+
+  private async validateDng(
+    file: string,
+    env: Record<string, string | undefined>,
+    signal: AbortSignal,
+    timeoutMs: number,
+  ): Promise<void> {
     let record: ExifRecord | undefined;
     try {
-      [record] = await this.exif([file], ["DNGVersion", "SampleFormat", "PhotometricInterpretation"], env, signal, timeoutMs);
+      [record] = await this.exif(
+        [file],
+        ["DNGVersion", "SampleFormat", "PhotometricInterpretation", "InternalSerialNumber", "SerialNumber"],
+        env,
+        signal,
+        timeoutMs,
+      );
     } catch (error) {
       throw asEngineError(error, "merge", timeoutMs);
     }
@@ -231,6 +258,9 @@ export class NativeEngine implements ImagingEngine {
         "The merge produced a file that isn't a floating-point RAW DNG.",
         JSON.stringify(record),
       );
+    }
+    if (record.InternalSerialNumber || record.SerialNumber) {
+      throw new NativeEngineError("metadata_not_stripped", "The camera's serial number couldn't be removed from the DNG.");
     }
   }
 

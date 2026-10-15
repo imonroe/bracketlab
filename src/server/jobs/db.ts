@@ -49,6 +49,11 @@ const MIGRATIONS: string[] = [
     beat_at  INTEGER NOT NULL
   );
   `,
+  // Exposure metadata read from each upload, so the bracket is checked before Merge.
+  `
+  ALTER TABLE job_inputs ADD COLUMN metadata TEXT;
+  ALTER TABLE job_inputs ADD COLUMN metadata_error TEXT;
+  `,
 ];
 
 export function migrate(db: Db): void {

@@ -83,7 +83,8 @@ width=$(exiftool -s -s -s -ImageWidth "$out/preview.jpg")
 height=$(exiftool -s -s -s -ImageHeight "$out/preview.jpg")
 [ "$width" -le 2560 ] && [ "$height" -le 2560 ] || fail "JPEG is ${width}x${height}, over 2560px"
 
-step "Identifying metadata (PRD section 10: strip from JPEG, decide for DNG)"
+# These are the raw tool outputs. The app strips both files (src/imaging/native.ts).
+step "Identifying metadata in the raw tool output (the app strips it)"
 for f in "$out/merged.dng" "$out/preview.jpg"; do
   found=$(exiftool -a -G1 -s -GPS:all -SerialNumber -InternalSerialNumber -LensSerialNumber \
     -OwnerName -Artist "$f" | grep -v ': *$' || true)

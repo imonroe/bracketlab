@@ -155,6 +155,21 @@ for (const [mode, code] of [
   });
 }
 
+test("the DNG is stripped of identifying tags before it is validated", async () => {
+  await engine().merge(request());
+  const exif = calls("exiftool");
+  const strip = exif.findIndex((c) => c.includes("-MakerNotes:all="));
+  const validate = exif.findIndex((c) => c.includes("-DNGVersion"));
+  assert.ok(strip >= 0 && validate > strip, exif.join("\n"));
+  assert.match(exif[strip], /-GPS:all= .*-SerialNumber= /);
+  assert.ok(exif[strip].endsWith(path.join(work, "merged.dng")));
+});
+
+test("a serial number that survives stripping fails the merge instead of shipping", async () => {
+  setting("dng.json", [{ ...DNG_OK[0], InternalSerialNumber: "1c000000ac0c" }]);
+  await assert.rejects(engine().merge(request()), (e: EngineError) => e.code === "metadata_not_stripped");
+});
+
 test("a DNG that isn't floating-point CFA data is rejected", async () => {
   setting("dng.json", [{ DNGVersion: "1.4.0.0", SampleFormat: 1, PhotometricInterpretation: 32803 }]);
   await assert.rejects(engine().merge(request()), (e: EngineError) => e.code === "invalid_output");

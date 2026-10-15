@@ -1,6 +1,6 @@
 import fsp from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
-import { DEFAULT_POLICY } from "./bracket";
+import { bracketPolicyFromEnv } from "./bracket";
 import { EngineError, type ImagingEngine } from "./engine";
 import { NativeEngine } from "./native";
 
@@ -66,12 +66,7 @@ export function engineFromEnv(): ImagingEngine {
         hdrmerge: process.env.BRACKETLAB_HDRMERGE ?? "hdrmerge",
         darktableCli: process.env.BRACKETLAB_DARKTABLE_CLI ?? "darktable-cli",
         exiftool: process.env.BRACKETLAB_EXIFTOOL ?? "exiftool",
-        policy: {
-          ...DEFAULT_POLICY,
-          supportedModels: process.env.BRACKETLAB_SUPPORTED_MODELS
-            ? process.env.BRACKETLAB_SUPPORTED_MODELS.split(",").map((m) => m.trim()).filter(Boolean)
-            : DEFAULT_POLICY.supportedModels,
-        },
+        policy: bracketPolicyFromEnv(),
         // Set in the Docker image.
         versions: {
           hdrmerge: process.env.HDRMERGE_COMMIT ?? "unknown",

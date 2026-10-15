@@ -94,6 +94,21 @@ test("listExpirable finds expired results and abandoned uploads", () => {
   assert.deepEqual(ids, [done.id, stale.id].sort());
 });
 
+test("inputs keep their exposure metadata, and a new upload clears a start rejection", () => {
+  const job = env.store.create("h", 1000);
+  env.store.transition(job.id, "uploading", "validating");
+  env.store.transition(job.id, "validating", "uploading", { errorCode: "x", errorMessage: "rejected" });
+  env.store.putInput(job.id, { ...input(0), exposure: { fileType: "ARW", exposureTime: 0.01 } });
+  env.store.putInput(job.id, { ...input(1), metadataError: "unreadable" });
+
+  const [a, b] = env.store.inputs(job.id);
+  assert.deepEqual(a.exposure, { fileType: "ARW", exposureTime: 0.01 });
+  assert.equal(a.metadataError, null);
+  assert.equal(b.exposure, null);
+  assert.equal(b.metadataError, "unreadable");
+  assert.equal(env.store.get(job.id)?.errorMessage, null);
+});
+
 test("deleting a job removes its inputs", () => {
   const job = env.store.create("h", 1000);
   env.store.putInput(job.id, input(0));

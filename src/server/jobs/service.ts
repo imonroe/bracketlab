@@ -1,5 +1,7 @@
 import fsp from "node:fs/promises";
-import { structuralPreflight } from "@/imaging/preflight";
+import { formatShutter } from "@/imaging/bracket";
+import { readExposures, type FileExposure } from "@/imaging/metadata";
+import { preflight, type PreflightIssue } from "@/imaging/preflight";
 import type { AppConfig } from "../config";
 import { apiError, notFound } from "../http";
 import { TooLargeError, removeTree, streamToFile } from "../storage/files";
@@ -17,12 +19,42 @@ export interface PublicJob {
   expiresAt: number;
   queuePosition: number | null;
   error: { code: string; message: string; retryable: boolean } | null;
-  inputs: { slot: number; name: string; bytes: number }[];
+  inputs: PublicInput[];
+  /** The pre-Merge check (PRD F2). Merge is allowed only when `ready` is true. */
+  bracket: {
+    ready: boolean;
+    errors: PreflightIssue[];
+    warnings: PreflightIssue[];
+    /** Slots from darkest to brightest with EV offsets, once the bracket checks out. */
+    order: { slot: number; evOffset: number }[] | null;
+  };
   artifacts: Record<ArtifactKind, { bytes: number } | null>;
   limits: { maxFileBytes: number; maxJobBytes: number };
 }
 
+export interface PublicInput {
+  slot: number;
+  name: string;
+  bytes: number;
+  /** Shown next to the file once its metadata is read, e.g. "1/400s · ISO 100 · f/8". */
+  exposure: { model?: string; shutter?: string; iso?: number; fNumber?: number; focalLength?: number } | null;
+  issues: PreflightIssue[];
+}
+
+function publicExposure(e: FileExposure | null): PublicInput["exposure"] {
+  if (!e) return null;
+  return {
+    model: e.model,
+    shutter: e.exposureTime === undefined ? undefined : formatShutter(e.exposureTime),
+    iso: e.iso,
+    fNumber: e.fNumber,
+    focalLength: e.focalLength,
+  };
+}
+
 export function toPublicJob(store: JobStore, config: AppConfig, job: Job): PublicJob {
+  const inputs = store.inputs(job.id);
+  const check = preflight(inputs, config.metadata?.policy ?? null);
   return {
     id: job.id,
     state: job.state,
@@ -34,7 +66,20 @@ export function toPublicJob(store: JobStore, config: AppConfig, job: Job): Publi
       job.errorCode === null
         ? null
         : { code: job.errorCode, message: job.errorMessage ?? "", retryable: job.retryable },
-    inputs: store.inputs(job.id).map((i) => ({ slot: i.slot, name: i.originalName, bytes: i.bytes })),
+    inputs: inputs.map((i) => ({
+      slot: i.slot,
+      name: i.originalName,
+      bytes: i.bytes,
+      exposure: publicExposure(i.exposure),
+      issues: check.byInput[i.slot] ?? [],
+    })),
+    bracket: {
+      ready: check.errors.length === 0,
+      // The count message is noise while files are still arriving.
+      errors: check.errors.filter((e) => e.code !== "wrong_count"),
+      warnings: check.warnings,
+      order: check.order,
+    },
     artifacts: {
       dng: job.dngBytes === null ? null : { bytes: job.dngBytes },
       jpeg: job.jpegBytes === null ? null : { bytes: job.jpegBytes },
@@ -111,8 +156,30 @@ export async function uploadInput(
     throw error;
   }
 
+  // Read the exposure tags now, so the page can show problems before Merge (PRD F2).
+  let exposure: FileExposure | null = null;
+  let metadataError: string | null = null;
+  if (config.metadata) {
+    try {
+      [exposure] = await readExposures([dest], {
+        exiftool: config.metadata.exiftool,
+        signal: request.signal,
+        timeoutMs: config.metadata.timeoutMs,
+      });
+      // An unreadable file comes back as an empty record; preflight reports it per file.
+    } catch (error) {
+      metadataError = String(error);
+    }
+  }
+
   try {
-    return store.putInput(job.id, { slot, originalName: displayName(request, slot), ...written });
+    return store.putInput(job.id, {
+      slot,
+      originalName: displayName(request, slot),
+      ...written,
+      exposure,
+      metadataError,
+    });
   } catch {
     // The job was canceled or deleted while the bytes were in flight.
     await fsp.rm(dest, { force: true });
@@ -149,14 +216,12 @@ export function startJob(store: JobStore, config: AppConfig, job: Job): Job | Re
   });
   if (!validating) return store.get(job.id) ?? job;
 
-  const preflight = structuralPreflight(store.inputs(job.id));
-  if (preflight.errors.length > 0) {
-    const [first] = preflight.errors;
-    store.transition(job.id, "validating", "uploading", {
-      errorCode: first.code,
-      errorMessage: preflight.errors.map((e) => e.message).join(" "),
-    });
-    return apiError(422, first.code, preflight.errors.map((e) => e.message).join(" "));
+  const check = preflight(store.inputs(job.id), config.metadata?.policy ?? null);
+  if (check.errors.length > 0) {
+    const [first] = check.errors;
+    const message = check.errors.map((e) => e.message).join(" ");
+    store.transition(job.id, "validating", "uploading", { errorCode: first.code, errorMessage: message });
+    return apiError(422, first.code, message);
   }
 
   if (store.countQueued() >= config.maxQueuedJobs) {
